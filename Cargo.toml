@@ -592,3 +592,6 @@ debug = "line-tables-only"
 inherits = "release"
 codegen-units = 1
 lto = true
+
+[patch.crates-io]
+target-lexicon = { git = "https://github.com/nanvix/target-lexicon", branch = "nanvix/v0.13.2" }

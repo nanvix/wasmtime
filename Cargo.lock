@@ -3306,9 +3306,8 @@ dependencies = [
 
 [[package]]
 name = "target-lexicon"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ff4a4048091358129767b8a200d6927f58876c8b5ea16fb7b0222d43b79bfa8"
+version = "0.13.2"
+source = "git+https://github.com/nanvix/target-lexicon?branch=nanvix%2Fv0.13.2#eb5ab9282967911d8b722e6fd39e74cf231dd808"
 
 [[package]]
 name = "tch"
