@@ -595,3 +595,4 @@ lto = true
 
 [patch.crates-io]
 target-lexicon = { git = "https://github.com/nanvix/target-lexicon", branch = "nanvix/v0.13.2" }
+libc = { git = "https://github.com/nanvix/libc", branch = "nanvix/v0.2.183" }

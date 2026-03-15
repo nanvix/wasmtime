@@ -9,7 +9,8 @@ fn main() {
     let unix = cfg("unix");
     let windows = cfg("windows");
     let miri = cfg("miri");
-    let supported_os = unix || windows;
+    let nanvix = cfg_is("target_os", "nanvix");
+    let supported_os = (unix || windows) && !nanvix;
 
     // Determine if the current host architecture is supported by Cranelift
     // meaning that we might be executing native code.

@@ -92,7 +92,7 @@ memfd = { workspace = true, optional = true }
 [target.'cfg(target_vendor = "apple")'.dependencies]
 mach2 = { workspace = true, optional = true }
 
-[target.'cfg(unix)'.dependencies]
+[target.'cfg(all(unix, not(target_os = "nanvix")))'.dependencies]
 rustix = { workspace = true, optional = true }
 
 [target.'cfg(target_arch = "s390x")'.dependencies]
