@@ -1643,6 +1643,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
+name = "hello-nanvix"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "libc",
+ "wasmtime",
+]
+
+[[package]]
 name = "hermit-abi"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2107,9 +2116,8 @@ checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
 
 [[package]]
 name = "libc"
-version = "0.2.171"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c19937216e9d3aa9956d9bb8dfc0b0c8beb6058fc4f7a4dc4d850edf86a237d6"
+version = "0.2.183"
+source = "git+https://github.com/nanvix/libc?branch=nanvix%2Fv0.2.183#1aed45d2e9f20e4ef774da354ff948a22f147870"
 
 [[package]]
 name = "libfuzzer-sys"
@@ -2599,6 +2607,15 @@ name = "ppv-lite86"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eb9f9e6e233e5c4a35559a617bf40a4ec447db2e84c20b55a6f83167b7e57872"
+
+[[package]]
+name = "precompile-wasm"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "wasmtime",
+ "wat",
+]
 
 [[package]]
 name = "prettyplease"

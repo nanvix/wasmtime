@@ -1,0 +1,5 @@
+[target.i686-unknown-nanvix]
+linker = "/opt/nanvix/v0.12.x/src/rust/build/x86_64-unknown-linux-gnu/lld/bin/ld.lld"
+rustflags = [
+    "-C", "linker-flavor=ld.lld",
+]

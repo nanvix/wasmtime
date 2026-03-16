@@ -161,6 +161,8 @@ members = [
   "examples/component/wasm",
   "examples/min-platform",
   "examples/min-platform/embedding",
+  "examples/hello-nanvix",
+  "examples/precompile-wasm",
   "fuzz",
   "winch/codegen",
 ]
