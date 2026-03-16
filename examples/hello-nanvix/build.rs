@@ -11,12 +11,12 @@ fn main() {
     println!("cargo:rerun-if-changed=user.ld");
 
     let nanvix_toolchain = std::env::var("NANVIX_TOOLCHAIN")
-        .unwrap_or_else(|_| "/opt/nanvix/v0.12.x".to_string());
+        .unwrap_or_else(|_| "/opt/nanvix".to_string());
 
     // Compile the wasmtime platform C API implementation.
     cc::Build::new()
         .file("wasmtime-platform.c")
-        .warnings(false)
+        .warnings(true)
         .compile("wasmtime-platform");
 
     // Custom linker script that merges .ctors/.got.plt into .data to avoid

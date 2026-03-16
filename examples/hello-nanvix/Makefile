@@ -15,8 +15,8 @@ ELF             := $(WASMTIME_DIR)/target/$(TARGET)/release/hello-nanvix.elf
 PRECOMPILED     := hello.cwasm
 PRECOMPILER     := $(WASMTIME_DIR)/target/release/precompile-wasm
 
-# LLD linker — find dynamically under NANVIX_TOOLCHAIN (default: /opt/nanvix/v0.12.x)
-NANVIX_TOOLCHAIN ?= /opt/nanvix/v0.12.x
+# LLD linker — find dynamically under NANVIX_TOOLCHAIN (default: /opt/nanvix)
+NANVIX_TOOLCHAIN ?= /opt/nanvix
 LLD_PATH := $(shell find $(NANVIX_TOOLCHAIN) -name ld.lld -type f 2>/dev/null | head -1)
 
 SHELL := /bin/bash

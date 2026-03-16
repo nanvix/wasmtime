@@ -8,7 +8,6 @@ description = "Hello World Wasmtime example for Nanvix OS"
 wasmtime = { path = "../../crates/wasmtime", default-features = false, features = [
     "runtime",
     "std",
-    "cranelift",
     "custom-virtual-memory",
 ] }
 libc = "0.2"
