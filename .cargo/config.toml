@@ -1,5 +1,7 @@
+# Linker is set via CARGO_TARGET_I686_UNKNOWN_NANVIX_LINKER env var
+# (see Makefile.nanvix and examples/hello-nanvix/Makefile).
+# LLD is required — GNU ld has link-ordering issues with wasmtime-platform.
 [target.i686-unknown-nanvix]
-linker = "/opt/nanvix/v0.12.x/src/rust/build/x86_64-unknown-linux-gnu/lld/bin/ld.lld"
 rustflags = [
     "-C", "linker-flavor=ld.lld",
 ]

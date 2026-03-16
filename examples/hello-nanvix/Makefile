@@ -15,6 +15,10 @@ ELF             := $(WASMTIME_DIR)/target/$(TARGET)/release/hello-nanvix.elf
 PRECOMPILED     := hello.cwasm
 PRECOMPILER     := $(WASMTIME_DIR)/target/release/precompile-wasm
 
+# LLD linker — find dynamically under NANVIX_TOOLCHAIN (default: /opt/nanvix/v0.12.x)
+NANVIX_TOOLCHAIN ?= /opt/nanvix/v0.12.x
+LLD_PATH := $(shell find $(NANVIX_TOOLCHAIN) -name ld.lld -type f 2>/dev/null | head -1)
+
 SHELL := /bin/bash
 .PHONY: all precompile build postprocess run clean
 
@@ -33,7 +37,8 @@ $(PRECOMPILER): ../precompile-wasm/src/main.rs ../precompile-wasm/Cargo.toml
 build: $(ELF)
 
 $(ELF): src/main.rs Cargo.toml build.rs wasmtime-platform.c user.ld $(PRECOMPILED)
-	cd $(WASMTIME_DIR) && cargo +$(TOOLCHAIN) build --release --target $(TARGET) -p hello-nanvix
+	cd $(WASMTIME_DIR) && CARGO_TARGET_I686_UNKNOWN_NANVIX_LINKER=$(LLD_PATH) \
+		cargo +$(TOOLCHAIN) build --release --target $(TARGET) -p hello-nanvix
 	$(MAKE) postprocess
 
 # Step 3: Post-process ELF to fix overlapping LOAD segments
