@@ -1,0 +1,2 @@
+# Precompiled WASM bytecode (build artifact from `make precompile`)
+hello.cwasm

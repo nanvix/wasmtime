@@ -71,6 +71,13 @@ CONSOLE_FILE := /tmp/.nanvix-wasmtime-console
 # Docker Build Command
 #===================================================================================================
 
+# rust-lld linker path (varies between Docker and host).
+# Docker: /opt/nanvix/rust-toolchain/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld
+# Host:   found dynamically under NANVIX_TOOLCHAIN.
+# Must use rust-lld (not gcc-ld/ld.lld wrapper) — rustc passes `-flavor gnu`.
+LLD_LINKER_ENV = CARGO_TARGET_I686_UNKNOWN_NANVIX_LINKER
+DOCKER_LLD := /opt/nanvix/rust-toolchain/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld
+
 ifeq ($(DOCKER), yes)
   CARGO_CMD = docker run --rm \
 	--init \
@@ -79,6 +86,7 @@ ifeq ($(DOCKER), yes)
 	--cpus=$$(( $$(nproc) / 2 )) \
 	-v "$$(pwd):/mnt" \
 	-e NANVIX_TOOLCHAIN=$(NANVIX_TOOLCHAIN) \
+	-e $(LLD_LINKER_ENV)=$(DOCKER_LLD) \
 	-e USER_ID=$$(id -u) \
 	-e GROUP_ID=$$(id -g) \
 	$(DOCKER_EXTRA_FLAGS) \
@@ -86,6 +94,7 @@ ifeq ($(DOCKER), yes)
 	/bin/bash -l -c 'cd /mnt && cargo $(NANVIX_RUST_TOOLCHAIN) $$*; _st=$$?; chown -R $$USER_ID:$$GROUP_ID /mnt/target 2>/dev/null || true; exit $$_st' _
 else
   CARGO_CMD = nice -n 20 env NANVIX_TOOLCHAIN=$(NANVIX_TOOLCHAIN) \
+	$(LLD_LINKER_ENV)=$$(find $(NANVIX_TOOLCHAIN) -name ld.lld -type f 2>/dev/null | head -1) \
 	cargo $(NANVIX_RUST_TOOLCHAIN)
 endif
 

@@ -1,0 +1,9 @@
+[package]
+name = "precompile-wasm"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+wasmtime = { path = "../../crates/wasmtime", default-features = false, features = ["cranelift", "std", "runtime"] }
+wat = "1"
+anyhow = "1"
