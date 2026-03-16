@@ -3324,7 +3324,7 @@ dependencies = [
 [[package]]
 name = "target-lexicon"
 version = "0.13.2"
-source = "git+https://github.com/nanvix/target-lexicon?branch=nanvix%2Fv0.13.2#eb5ab9282967911d8b722e6fd39e74cf231dd808"
+source = "git+https://github.com/nanvix/target-lexicon?branch=nanvix%2Fv0.13.2#6b09b83cfb4a90b8caf6333f94aa127aeae5a593"
 
 [[package]]
 name = "tch"
