@@ -1,0 +1,198 @@
+# Makefile for building and testing Wasmtime on Nanvix OS
+#
+# Usage:
+#   make -f Makefile.nanvix all           — precompile WASM + build guest binary + post-process ELF
+#   make -f Makefile.nanvix run           — run on Nanvix microvm and validate output
+#   make -f Makefile.nanvix clean         — remove build artifacts
+#   make -f Makefile.nanvix help          — show all targets
+#
+# Required: NANVIX_HOME must point to an extracted Nanvix release.
+
+# Shell configuration for better error handling
+SHELL := /bin/bash
+.SHELLFLAGS := -ec
+
+#===================================================================================================
+# Configuration Variables
+#===================================================================================================
+
+# Location of the extracted Nanvix release (contains bin/nanvixd.elf, bin/kernel.elf, etc.)
+NANVIX_HOME ?= $(HOME)/nanvix
+
+# Nanvix toolchain location (inside Docker: /opt/nanvix, on host: /opt/nanvix/v0.12.x)
+NANVIX_TOOLCHAIN ?= /opt/nanvix
+
+# Rust toolchain to use for building.
+NANVIX_RUST_TOOLCHAIN ?= +nanvix-x86
+
+# Set to 'yes' to build with Docker (required in CI), or 'no' for native cargo.
+DOCKER ?= yes
+
+# Set to 'yes' for verbose cargo output, or 'no' for quiet mode.
+VERBOSE ?= no
+
+# Extra Docker flags (e.g., sccache mounts from CI).
+DOCKER_EXTRA_FLAGS ?=
+
+#===================================================================================================
+# Internal Variables
+#===================================================================================================
+
+.DEFAULT_GOAL := help
+
+ifeq ($(VERBOSE), no)
+  Q := @
+  CARGO_VERBOSE :=
+else
+  Q :=
+  CARGO_VERBOSE := -vv
+endif
+
+# Target triple.
+NANVIX_TARGET := i686-unknown-nanvix
+
+# Directories.
+TARGET_DIR := target/$(NANVIX_TARGET)/release
+HOST_TARGET_DIR := target/release
+EXAMPLE_DIR := examples/hello-nanvix
+
+# Artifacts.
+PRECOMPILER := $(HOST_TARGET_DIR)/precompile-wasm
+PRECOMPILED := $(EXAMPLE_DIR)/hello.cwasm
+ELF := $(TARGET_DIR)/hello-nanvix.elf
+
+# nanvixd configuration.
+NANVIXD_BINARY := $(NANVIX_HOME)/bin/nanvixd.elf
+
+# Console output temp file.
+CONSOLE_FILE := /tmp/.nanvix-wasmtime-console
+
+#===================================================================================================
+# Docker Build Command
+#===================================================================================================
+
+ifeq ($(DOCKER), yes)
+  CARGO_CMD = docker run --rm \
+	--init \
+	--sig-proxy=true \
+	--cpu-shares=256 \
+	--cpus=$$(( $$(nproc) / 2 )) \
+	-v "$$(pwd):/mnt" \
+	-e NANVIX_TOOLCHAIN=$(NANVIX_TOOLCHAIN) \
+	-e USER_ID=$$(id -u) \
+	-e GROUP_ID=$$(id -g) \
+	$(DOCKER_EXTRA_FLAGS) \
+	nanvix/toolchain:latest-minimal \
+	/bin/bash -l -c 'cd /mnt && cargo $(NANVIX_RUST_TOOLCHAIN) $$*; _st=$$?; chown -R $$USER_ID:$$GROUP_ID /mnt/target 2>/dev/null || true; exit $$_st' _
+else
+  CARGO_CMD = nice -n 20 env NANVIX_TOOLCHAIN=$(NANVIX_TOOLCHAIN) \
+	cargo $(NANVIX_RUST_TOOLCHAIN)
+endif
+
+#===================================================================================================
+# Targets
+#===================================================================================================
+
+.PHONY: all precompile build postprocess run clean help
+
+help:
+	$(Q)echo "Wasmtime for Nanvix — Build & Test"
+	$(Q)echo ""
+	$(Q)echo "Targets:"
+	$(Q)echo "  all           Build everything (precompile + build + postprocess)"
+	$(Q)echo "  precompile    Build host precompiler and generate Pulley32 bytecode"
+	$(Q)echo "  build         Cross-compile the hello-nanvix guest binary"
+	$(Q)echo "  postprocess   Fix ELF overlapping LOAD segments for Nanvix kernel"
+	$(Q)echo "  run           Run on Nanvix microvm and validate output"
+	$(Q)echo "  clean         Remove build artifacts"
+	$(Q)echo ""
+	$(Q)echo "Variables:"
+	$(Q)echo "  NANVIX_HOME=<path>     Nanvix release directory (default: $(NANVIX_HOME))"
+	$(Q)echo "  DOCKER=[yes|no]        Use Docker for builds (default: $(DOCKER))"
+	$(Q)echo "  VERBOSE=[yes|no]       Verbose output (default: $(VERBOSE))"
+
+# Build everything.
+all: precompile build
+	$(Q)echo "✓ All wasmtime artifacts built successfully!"
+
+# Step 1: Build the host precompiler and generate Pulley32 bytecode.
+precompile: $(PRECOMPILED)
+
+$(PRECOMPILED): $(PRECOMPILER)
+	$(Q)echo "=== Generating Pulley32 bytecode ==="
+	$(Q)$(PRECOMPILER) $(PRECOMPILED)
+
+$(PRECOMPILER): examples/precompile-wasm/src/main.rs examples/precompile-wasm/Cargo.toml
+	$(Q)echo "=== Building host precompiler ==="
+	$(Q)$(CARGO_CMD) build --release -p precompile-wasm $(CARGO_VERBOSE)
+	$(Q)echo "✓ Precompiler built"
+
+# Step 2: Cross-compile the hello-nanvix guest binary.
+build: $(ELF)
+
+$(ELF): $(EXAMPLE_DIR)/src/main.rs $(EXAMPLE_DIR)/Cargo.toml $(EXAMPLE_DIR)/build.rs \
+        $(EXAMPLE_DIR)/wasmtime-platform.c $(EXAMPLE_DIR)/user.ld $(PRECOMPILED)
+	$(Q)echo "=== Building hello-nanvix guest binary ==="
+	$(Q)$(CARGO_CMD) build --release --target $(NANVIX_TARGET) -p hello-nanvix $(CARGO_VERBOSE)
+	$(Q)$(MAKE) -f Makefile.nanvix postprocess
+	$(Q)echo "✓ Guest binary built and post-processed"
+
+# Step 3: Post-process ELF to fix overlapping LOAD segments.
+# Nanvix kernel rejects binaries with two LOAD segments mapping the same virtual page.
+# 1. Convert .bss from NOBITS to PROGBITS (otherwise LLD creates separate segments)
+# 2. Merge overlapping RW LOAD segments by extending the first and nulling the second
+postprocess:
+	$(Q)objcopy --set-section-flags .bss=alloc,load,contents "$(ELF)" 2>/dev/null || true
+	$(Q)python3 -c "\
+import struct; \
+f = open('$(ELF)', 'r+b'); \
+f.seek(28); e_phoff = struct.unpack('<I', f.read(4))[0]; \
+f.seek(42); e_phentsize = struct.unpack('<H', f.read(2))[0]; \
+e_phnum = struct.unpack('<H', f.read(2))[0]; \
+phdrs = []; \
+[f.seek(e_phoff + i * e_phentsize) or phdrs.append(list(struct.unpack('<IIIIIIII', f.read(32)))) for i in range(e_phnum)]; \
+rw = [(i, p) for i, p in enumerate(phdrs) if p[0] == 1 and (p[6] & 2)]; \
+exec( \
+'if len(rw) >= 2:\n' \
+'    i0, p0 = rw[0]; i1, p1 = rw[1]\n' \
+'    if (p0[2] + p0[5] - 1) // 0x1000 >= p1[2] // 0x1000:\n' \
+'        p0[4] = p1[1] + p1[4] - p0[1]; p0[5] = p1[2] + p1[5] - p0[2]\n' \
+'        f.seek(e_phoff + i0 * e_phentsize); f.write(struct.pack(\"<IIIIIIII\", *p0))\n' \
+'        p1[0] = 0; f.seek(e_phoff + i1 * e_phentsize); f.write(struct.pack(\"<IIIIIIII\", *p1))\n' \
+); \
+f.close()"
+
+# Step 4: Run on Nanvix and validate output.
+# - setsid --wait: nanvixd requires its own session for proper KVM console I/O
+# - timeout 15: wasmtime cleanup code blocks the normal exit path
+# - Validates that "hello() = 42" appears in the console output
+run: $(ELF)
+	$(Q)echo "=== Running hello-nanvix on Nanvix ==="
+	$(Q)test -f "$(NANVIXD_BINARY)" || (echo "Error: $(NANVIXD_BINARY) not found" && exit 1)
+	$(Q)test -f "$(ELF)" || (echo "Error: $(ELF) not found" && exit 1)
+	$(Q)rm -f $(CONSOLE_FILE)
+	$(Q)cd "$(NANVIX_HOME)" && setsid --wait env RUST_LOG=warn timeout 15 \
+		./bin/nanvixd.elf -console-file $(CONSOLE_FILE) -- "$(abspath $(ELF))" \
+		</dev/null >/dev/null 2>&1 || true
+	$(Q)if strings $(CONSOLE_FILE) 2>/dev/null | grep -q 'hello() = 42'; then \
+		echo "✓ hello-nanvix executed successfully: hello() = 42"; \
+	else \
+		echo "✗ FAILED: expected 'hello() = 42' in console output"; \
+		echo "--- Console output (filtered) ---"; \
+		strings $(CONSOLE_FILE) 2>/dev/null | head -50; \
+		rm -f $(CONSOLE_FILE); \
+		exit 1; \
+	fi
+	$(Q)rm -f $(CONSOLE_FILE)
+
+# Clean build artifacts.
+clean:
+	$(Q)echo "=== Cleaning build artifacts ==="
+	$(Q)rm -f $(PRECOMPILED)
+ifeq ($(DOCKER), yes)
+	$(Q)docker run --rm -v "$$(pwd):/mnt" nanvix/toolchain:latest-minimal \
+		/bin/bash -l -c 'cd /mnt && cargo $(NANVIX_RUST_TOOLCHAIN) clean' 2>/dev/null || true
+else
+	$(Q)cargo $(NANVIX_RUST_TOOLCHAIN) clean 2>/dev/null || true
+endif
+	$(Q)echo "✓ Clean completed!"

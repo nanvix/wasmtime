@@ -1,0 +1,31 @@
+name: Update Nanvix Dependencies
+
+on:
+  # Nightly run ensures long-lived branches do not drift from defaults.
+  schedule:
+    - cron: "0 0 * * *"
+  # Automatically re-sync whenever nanvix/* branches receive direct pushes.
+  push:
+    branches:
+      - nanvix/**
+  # Automatically run CI on PRs targeting nanvix/* branches.
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+    branches:
+      - nanvix/**
+  # Manual trigger allows running the CI on-demand.
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    uses: nanvix/workflows/.github/workflows/update-rust-deps.yml@main
+    with:
+      base-branch: ${{ (github.event_name == 'pull_request' && github.event.pull_request.base.ref) || github.ref_name }}
+      commit-message: "Update Nanvix Dependencies"
+      pr-title: "Update Nanvix Dependencies"
+      pr-branch: "automation/update-nanvix-dependencies"
+      labels: "enhancement"
+      reviewers: "ppenna"
+      assignees: "ppenna"
+    secrets:
+      automation-token: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,188 @@
+name: Nanvix CI
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  push:
+    branches:
+      - nanvix/**
+  pull_request:
+    branches:
+      - nanvix/**
+  workflow_dispatch:
+  repository_dispatch:
+    types: [nanvix-minor-release, nanvix-major-release]
+
+permissions:
+  contents: write
+  actions: write
+  issues: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name || github.ref || 'default' }}
+  cancel-in-progress: ${{ github.event_name == 'repository_dispatch' }}
+
+jobs:
+  # Extract Nanvix SHA once — all matrix builds use the same Nanvix release.
+  get-nanvix-info:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.extract.outputs.sha }}
+      sha_full: ${{ steps.extract.outputs.sha_full }}
+    steps:
+      - name: Download Nanvix Release Info
+        id: extract
+        run: |
+          set -euo pipefail
+          curl -fsSL https://raw.githubusercontent.com/nanvix/nanvix/refs/heads/dev/scripts/get-nanvix.sh | bash -s -- --force nanvix-artifacts
+          ARTIFACT_FILE=$(find nanvix-artifacts -maxdepth 1 -type f -name "*.tar.bz2" | head -1)
+          if [[ -z "$ARTIFACT_FILE" ]]; then
+            echo "::error::No Nanvix artifact found"
+            exit 1
+          fi
+          NANVIX_SHA_FULL=$(basename "$ARTIFACT_FILE" | sed -E 's/.*-([a-f0-9]{40})\.tar\.bz2$/\1/')
+          NANVIX_SHA="${NANVIX_SHA_FULL::7}"
+          echo "Nanvix commit SHA: $NANVIX_SHA_FULL (short: $NANVIX_SHA)"
+          echo "sha=$NANVIX_SHA" >> "$GITHUB_OUTPUT"
+          echo "sha_full=$NANVIX_SHA_FULL" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: get-nanvix-info
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: microvm
+            process-mode: standalone
+            memory: 128mb
+    name: ${{ matrix.platform }}-${{ matrix.process-mode }}-${{ matrix.memory }}
+    env:
+      NANVIX_SHA: ${{ needs.get-nanvix-info.outputs.sha }}
+      NANVIX_SHA_FULL: ${{ needs.get-nanvix-info.outputs.sha_full }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free Disk Space
+        run: |
+          echo "=== Disk space before cleanup ==="
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/hostedtoolcache \
+            /usr/local/graalvm /usr/local/.ghcup /usr/share/swift \
+            /usr/local/share/boost /usr/lib/jvm /opt/ghc \
+            /opt/microsoft/powershell /usr/local/share/chromium
+          docker system prune -af || true
+          echo "=== Disk space after cleanup ==="
+          df -h /
+
+      - name: Pull Docker Image
+        run: docker pull nanvix/toolchain:latest-minimal
+
+      - name: Setup sccache
+        run: |
+          set -euo pipefail
+          SCCACHE_VERSION="v0.9.1"
+          SCCACHE_ARCHIVE="sccache-${SCCACHE_VERSION}-x86_64-unknown-linux-musl"
+          curl -fsSL "https://github.com/mozilla/sccache/releases/download/${SCCACHE_VERSION}/${SCCACHE_ARCHIVE}.tar.gz" | tar xz
+          SCCACHE_BIN="$(pwd)/${SCCACHE_ARCHIVE}/sccache"
+          chmod +x "$SCCACHE_BIN"
+          mkdir -p sccache-cache
+          echo "SCCACHE_BIN=$SCCACHE_BIN" >> "$GITHUB_ENV"
+          echo "SCCACHE_CACHE_DIR=$(pwd)/sccache-cache" >> "$GITHUB_ENV"
+          DOCKER_EXTRA_FLAGS="-v ${SCCACHE_BIN}:/usr/local/bin/sccache:ro"
+          DOCKER_EXTRA_FLAGS+=" -v $(pwd)/sccache-cache:/tmp/sccache"
+          DOCKER_EXTRA_FLAGS+=" -e SCCACHE=/usr/local/bin/sccache"
+          DOCKER_EXTRA_FLAGS+=" -e SCCACHE_DIR=/tmp/sccache"
+          DOCKER_EXTRA_FLAGS+=" -e SCCACHE_IDLE_TIMEOUT=0"
+          echo "DOCKER_EXTRA_FLAGS=$DOCKER_EXTRA_FLAGS" >> "$GITHUB_ENV"
+
+      - name: Restore sccache cache
+        uses: actions/cache/restore@v4
+        with:
+          path: sccache-cache
+          key: sccache-${{ matrix.platform }}-${{ matrix.process-mode }}-${{ github.sha }}
+          restore-keys: |
+            sccache-${{ matrix.platform }}-${{ matrix.process-mode }}-
+            sccache-
+
+      - name: Download and Extract Nanvix Release
+        run: |
+          set -euo pipefail
+          curl -fsSL https://raw.githubusercontent.com/nanvix/nanvix/refs/heads/dev/scripts/get-nanvix.sh | bash -s -- --force nanvix-artifacts
+          ARTIFACT_PATTERN="${{ matrix.platform }}.*${{ matrix.process-mode }}.*${{ matrix.memory }}.*\.tar\.bz2"
+          ARTIFACT_FILE=$(find nanvix-artifacts -maxdepth 1 -type f -name "*.tar.bz2" | grep -E "$ARTIFACT_PATTERN" | head -1)
+          if [[ -z "$ARTIFACT_FILE" ]]; then
+            echo "::error::No ${{ matrix.platform }} ${{ matrix.process-mode }} artifact found"
+            exit 1
+          fi
+          mkdir -p nanvix-artifacts/extracted
+          tar -xjf "$ARTIFACT_FILE" -C nanvix-artifacts/extracted
+          NANVIX_HOME=$(find "$(pwd)/nanvix-artifacts/extracted" -maxdepth 2 -type d -name "bin" -exec dirname {} \; | head -1)
+          echo "NANVIX_HOME=$NANVIX_HOME" >> "$GITHUB_ENV"
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Build
+        run: |
+          make -f Makefile.nanvix NANVIX_HOME="$NANVIX_HOME" DOCKER=yes VERBOSE=yes DOCKER_EXTRA_FLAGS="$DOCKER_EXTRA_FLAGS" all
+
+      - name: Run and Validate
+        run: |
+          make -f Makefile.nanvix NANVIX_HOME="$NANVIX_HOME" DOCKER=yes VERBOSE=yes DOCKER_EXTRA_FLAGS="$DOCKER_EXTRA_FLAGS" run
+
+      - name: Cleanup Dangling Resources
+        if: always()
+        run: |
+          find /tmp -maxdepth 1 -type d -name 'nvx:*' -exec rm -rf {} + 2>/dev/null || true
+
+      - name: Fix sccache cache permissions
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" sccache-cache 2>/dev/null || true
+
+      - name: Save sccache cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: sccache-cache
+          key: sccache-${{ matrix.platform }}-${{ matrix.process-mode }}-${{ github.sha }}
+
+  report-failure:
+    needs:
+      - build
+    if: >-
+      ${{ always() &&
+          (github.event_name == 'repository_dispatch' || github.event_name == 'schedule' || github.event_name == 'push') &&
+          needs.build.result == 'failure' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create failure issue
+        uses: actions/github-script@v7
+        env:
+          BUILD_RESULT: ${{ needs.build.result }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const title = `CI failure (run ${context.runNumber})`;
+            const body = [
+              `The wasmtime Nanvix CI workflow failed.`,
+              `- Trigger: ${context.eventName}`,
+              `- Run: [#${context.runNumber}](${runUrl})`,
+              `- SHA: ${context.sha}`,
+              `- build: ${process.env.BUILD_RESULT}`,
+              '',
+              'Please investigate and take any corrective actions.'
+            ].join('\n');
+            await github.rest.issues.create({
+              owner,
+              repo,
+              title,
+              body,
+              assignees: ['ppenna']
+            });
