@@ -71,11 +71,12 @@ CONSOLE_FILE := /tmp/.nanvix-wasmtime-console
 # Docker Build Command
 #===================================================================================================
 
-# LLD linker path (varies between Docker and host).
-# Docker: known stable path in the toolchain image.
+# rust-lld linker path (varies between Docker and host).
+# Docker: /opt/nanvix/rust-toolchain/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld
 # Host:   found dynamically under NANVIX_TOOLCHAIN.
+# Must use rust-lld (not gcc-ld/ld.lld wrapper) — rustc passes `-flavor gnu`.
 LLD_LINKER_ENV = CARGO_TARGET_I686_UNKNOWN_NANVIX_LINKER
-DOCKER_LLD := /opt/nanvix/rust-toolchain/lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld/ld.lld
+DOCKER_LLD := /opt/nanvix/rust-toolchain/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld
 
 ifeq ($(DOCKER), yes)
   CARGO_CMD = docker run --rm \
